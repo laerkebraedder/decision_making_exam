@@ -1,0 +1,81 @@
+model {
+
+  #-------------------------------------------------------------------
+  #-------------------  Group-level priors -------------
+  #-------------------------------------------------------------------
+  
+  mu_alpha_log ~ dnorm(0,1) # group average alpha (NB! normally distr)
+  
+  mu_rho_probit ~ dnorm(0,1)
+  
+  mu_omega_probit ~ dnorm(0,1)
+  
+  #------ Individual priors ---------------------------------------
+  #-----------------------------------------------------------------
+  #------ variance priors ------------------------------------------
+  # standard deviation for initial belief (inverse gamma priors)
+  tau_alpha ~ dgamma(.01,.01)
+  sigma_alpha <- 1/sqrt(tau_alpha) 
+
+  # concentration (precision) of rate parameters (for beta priors)
+  sigma_rho ~ dunif(1,100)
+  sigma_omega ~ dunif(1,100)
+  
+  # reparameterising gamma prior for beliefs about others on first trial 
+  log(mu_alpha) <- mu_alpha_log # standardisation of initial belief mode - log link
+  rate_alpha <- ( mu_alpha + sqrt( mu_alpha^2 + 4*sigma_alpha^2 ))/
+                  (2*sigma_alpha^2) 
+  shape_alpha <- 1 + mu_alpha * rate_alpha
+
+  #reparamaterising beta prior for slope of preference sin CC model
+  probit(mu_rho) <- mu_rho_probit # standardisation of rate estimate mean - probit link
+  shape1_rho <- (mu_rho) * sigma_rho
+  shape2_rho <- (1 - mu_rho) * sigma_rho 
+
+  #reparamaterising beta prior for belief updating in CC model
+  probit(mu_omega) <- mu_omega_probit # standardisation of rate estimate mean - probit link
+  shape1_omega <- (mu_omega) * sigma_omega
+  shape2_omega <- (1 - mu_omega) * sigma_omega
+  
+  #-------------------------------------------------------------------
+  #-------------------  Individual level model -----------------------
+  #-------------------------------------------------------------------
+
+  for (g in 1:ngroups) {
+  
+    for (s in 1:groupSize) {
+      #--------------- Model priors ------------------------------------------------------
+      
+      alpha[s,g] ~ dgamma(shape_alpha,rate_alpha)T(0.001,)
+      rho[s,g] ~ dbeta(shape1_rho,shape2_rho)T(0.001,0.999)
+      omega[s,g] ~ dbeta(shape1_omega,shape2_omega)T(0.001,0.999)
+      
+      #beliefs about others on first trial - gamma-poisson distribution
+      Gb[s,1,g] ~ dpois(alpha[s,g])
+
+      # modelled preference and first contribution - see below
+      p[s,1,g] <- (rho[s,g]*Gb[s,1,g])
+      c[s,1,g,1] ~ dpois(p[s,1,g])
+        
+    }
+
+    #--------------- Implementation of CC model --------------------------------
+
+    for (t in 2:ntrials) {
+        
+      for (s in 1:groupSize) {
+        
+        #- Belief about group contribution
+        Gb[s,t,g] <- ((1-omega[s,g])*(Gb[s,t-1,g]))+(omega[s,g]*(Ga[s,t-1,g,1]))
+
+        #- Contribution preference, given belief and matching preference rho  
+        p[s,t,g] <- rho[s,g]*Gb[s,t,g]
+
+        #- Contribution as discrete sample from preferences
+        c[s,t,g,1] ~ dpois(p[s,t,g])
+      }
+        
+    }
+  }
+  
+}
